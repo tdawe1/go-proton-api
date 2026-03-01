@@ -3,7 +3,3 @@
 *~
 .idea
 .vscode
-
-# Environment files
-.env*
-!.env.example
