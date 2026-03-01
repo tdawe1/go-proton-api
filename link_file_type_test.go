@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rclone/go-proton-api"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_HMAC(t *testing.T) {
