@@ -33,10 +33,31 @@ func (c *Client) RequestBlockUpload(ctx context.Context, req BlockUploadReq) ([]
 }
 
 func (c *Client) UploadBlock(ctx context.Context, bareURL, token string, block io.Reader) error {
-	return c.do(ctx, func(r *resty.Request) (*resty.Response, error) {
-		return r.
-			SetHeader("pm-storage-token", token).
-			SetMultipartField("Block", "blob", "application/octet-stream", block).
-			Post(bareURL)
-	})
+	var uploadErr error
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		uploadErr = c.do(ctx, func(r *resty.Request) (*resty.Response, error) {
+			return r.
+				SetHeader("pm-storage-token", token).
+				SetMultipartField("Block", "blob", "application/octet-stream", block).
+				Post(bareURL)
+		})
+		if uploadErr == nil {
+			return nil
+		}
+
+		if attempt < 3 {
+			seeker, ok := block.(io.Seeker)
+			if !ok {
+				break
+			}
+
+			if _, seekErr := seeker.Seek(0, io.SeekStart); seekErr != nil {
+				uploadErr = seekErr
+				break
+			}
+		}
+	}
+
+	return uploadErr
 }
