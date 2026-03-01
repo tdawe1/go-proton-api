@@ -1,6 +1,7 @@
 package proton
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,34 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/sirupsen/logrus"
 )
+
+type retryControlContextKey struct{}
+
+func withRetryDisabled(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	return context.WithValue(ctx, retryControlContextKey{}, true)
+}
+
+func isRetryDisabledContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+
+	disabled, _ := ctx.Value(retryControlContextKey{}).(bool)
+
+	return disabled
+}
+
+func isRetryDisabled(res *resty.Response) bool {
+	if res == nil || res.Request == nil {
+		return false
+	}
+
+	return isRetryDisabledContext(res.Request.Context())
+}
 
 type Code int
 
@@ -180,14 +209,38 @@ func catchRetryAfter(_ *resty.Client, res *resty.Response) (time.Duration, error
 }
 
 func catchTooManyRequests(res *resty.Response, _ error) bool {
+	if isRetryDisabled(res) {
+		return false
+	}
+
+	if res == nil {
+		return false
+	}
+
 	return res.StatusCode() == http.StatusTooManyRequests || res.StatusCode() == http.StatusServiceUnavailable
 }
 
 func catchDialError(res *resty.Response, err error) bool {
+	if isRetryDisabled(res) {
+		return false
+	}
+
+	if res == nil {
+		return false
+	}
+
 	return res.RawResponse == nil
 }
 
-func catchDropError(_ *resty.Response, err error) bool {
+func catchDropError(res *resty.Response, err error) bool {
+	if isRetryDisabled(res) {
+		return false
+	}
+
+	if res == nil {
+		return false
+	}
+
 	if netErr := new(net.OpError); errors.As(err, &netErr) {
 		return true
 	}

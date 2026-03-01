@@ -2,7 +2,10 @@ package proton
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net"
+	"net/http"
 
 	"github.com/go-resty/resty/v2"
 )
@@ -33,10 +36,17 @@ func (c *Client) RequestBlockUpload(ctx context.Context, req BlockUploadReq) ([]
 }
 
 func (c *Client) UploadBlock(ctx context.Context, bareURL, token string, block io.Reader) error {
+	uploadCtx := withRetryDisabled(ctx)
+
+	maxAttempts := c.m.rc.RetryCount + 1
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
 	var uploadErr error
 
-	for attempt := 1; attempt <= 3; attempt++ {
-		uploadErr = c.do(ctx, func(r *resty.Request) (*resty.Response, error) {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		uploadErr = c.do(uploadCtx, func(r *resty.Request) (*resty.Response, error) {
 			return r.
 				SetHeader("pm-storage-token", token).
 				SetMultipartField("Block", "blob", "application/octet-stream", block).
@@ -46,18 +56,40 @@ func (c *Client) UploadBlock(ctx context.Context, bareURL, token string, block i
 			return nil
 		}
 
-		if attempt < 3 {
-			seeker, ok := block.(io.Seeker)
-			if !ok {
-				break
-			}
+		if attempt == maxAttempts || !shouldRetryUploadBlock(uploadErr) {
+			break
+		}
 
-			if _, seekErr := seeker.Seek(0, io.SeekStart); seekErr != nil {
-				uploadErr = seekErr
-				break
-			}
+		seeker, ok := block.(io.Seeker)
+		if !ok {
+			break
+		}
+
+		if _, seekErr := seeker.Seek(0, io.SeekStart); seekErr != nil {
+			uploadErr = seekErr
+			break
 		}
 	}
 
 	return uploadErr
+}
+
+func shouldRetryUploadBlock(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	if netErr := (*NetError)(nil); errors.As(err, &netErr) {
+		return true
+	}
+
+	if opErr := (*net.OpError)(nil); errors.As(err, &opErr) {
+		return true
+	}
+
+	if apiErr := (*APIError)(nil); errors.As(err, &apiErr) {
+		return apiErr.Status == http.StatusTooManyRequests || apiErr.Status == http.StatusServiceUnavailable
+	}
+
+	return false
 }

@@ -140,7 +140,7 @@ func (c *Client) doRes(ctx context.Context, fn func(*resty.Request) (*resty.Resp
 		}
 
 		// If we receive a 401, we need to refresh the auth.
-		if res.StatusCode() == http.StatusUnauthorized {
+		if res.StatusCode() == http.StatusUnauthorized && !isRetryDisabledContext(ctx) {
 			if err := c.authRefresh(ctx); err != nil {
 				return nil, fmt.Errorf("failed to refresh auth: %w", err)
 			}
