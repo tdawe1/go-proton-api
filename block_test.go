@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -184,6 +185,30 @@ func TestUploadBlockReturnsSeekError(t *testing.T) {
 	require.Equal(t, 1, calls)
 }
 
+func TestUploadBlockRetriesOnTransportError(t *testing.T) {
+	retryCount := 3
+	calls := 0
+	transportErr := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("network down")}
+
+	m := proton.New(
+		proton.WithHostURL("https://example.invalid"),
+		proton.WithRetryCount(retryCount),
+		proton.WithTransport(roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			return nil, transportErr
+		})),
+	)
+	defer m.Close()
+
+	c := m.NewClient("", "", "")
+	defer c.Close()
+
+	err := c.UploadBlock(context.Background(), "https://storage.proton.invalid/storage/blocks", "token", bytes.NewReader([]byte("payload")))
+	require.Error(t, err)
+	require.ErrorIs(t, err, transportErr)
+	require.Equal(t, retryCount+1, calls)
+}
+
 func mustReadBlockPayload(t *testing.T, r *http.Request) []byte {
 	t.Helper()
 
@@ -204,4 +229,10 @@ type failingSeekReader struct {
 
 func (r *failingSeekReader) Seek(int64, int) (int64, error) {
 	return 0, r.err
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

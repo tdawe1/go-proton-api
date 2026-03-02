@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -208,16 +209,20 @@ func catchRetryAfter(_ *resty.Client, res *resty.Response) (time.Duration, error
 	return time.Duration(after) * time.Second, nil
 }
 
-func catchTooManyRequests(res *resty.Response, _ error) bool {
+func catchTooManyRequests(res *resty.Response, err error) bool {
 	if isRetryDisabled(res) {
 		return false
 	}
 
-	if res == nil {
-		return false
+	if res != nil {
+		return res.StatusCode() == http.StatusTooManyRequests || res.StatusCode() == http.StatusServiceUnavailable
 	}
 
-	return res.StatusCode() == http.StatusTooManyRequests || res.StatusCode() == http.StatusServiceUnavailable
+	if apiErr := (*APIError)(nil); errors.As(err, &apiErr) {
+		return apiErr.Status == http.StatusTooManyRequests || apiErr.Status == http.StatusServiceUnavailable
+	}
+
+	return isTransientTransportError(err)
 }
 
 func catchDialError(res *resty.Response, err error) bool {
@@ -226,10 +231,14 @@ func catchDialError(res *resty.Response, err error) bool {
 	}
 
 	if res == nil {
-		return false
+		return isTransientTransportError(err)
 	}
 
-	return res.RawResponse == nil
+	if res.RawResponse == nil {
+		return err == nil || isTransientTransportError(err)
+	}
+
+	return isTransientTransportError(err)
 }
 
 func catchDropError(res *resty.Response, err error) bool {
@@ -237,12 +246,75 @@ func catchDropError(res *resty.Response, err error) bool {
 		return false
 	}
 
+	if isTransientTransportError(err) {
+		return true
+	}
+
 	if res == nil {
 		return false
 	}
 
-	if netErr := new(net.OpError); errors.As(err, &netErr) {
+	if res.RawResponse == nil {
+		return err == nil || isTransientTransportError(err)
+	}
+
+	return false
+}
+
+func isTransientTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
 		return true
+	}
+
+	if opErr := (*net.OpError)(nil); errors.As(err, &opErr) {
+		if errors.Is(opErr.Err, context.Canceled) {
+			return false
+		}
+
+		if errors.Is(opErr.Err, context.DeadlineExceeded) {
+			return true
+		}
+
+		var netErr net.Error
+		if errors.As(opErr.Err, &netErr) {
+			return netErr.Timeout()
+		}
+
+		return true
+	}
+
+	if urlErr := (*url.Error)(nil); errors.As(err, &urlErr) {
+		if errors.Is(urlErr.Err, context.Canceled) {
+			return false
+		}
+
+		if errors.Is(urlErr.Err, context.DeadlineExceeded) {
+			return true
+		}
+
+		if opErr := (*net.OpError)(nil); errors.As(urlErr.Err, &opErr) {
+			return true
+		}
+
+		var netErr net.Error
+		if errors.As(urlErr.Err, &netErr) {
+			return netErr.Timeout()
+		}
+
+		return false
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return netErr.Timeout()
 	}
 
 	return false

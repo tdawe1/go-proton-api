@@ -9,7 +9,7 @@ func TestIsDeleteChildrenResponseCodeAllowed(t *testing.T) {
 		want bool
 	}{
 		{name: "success", code: SuccessCode, want: true},
-		{name: "not_found", code: 2501, want: true},
+		{name: "not_found", code: AFileOrFolderNotFound, want: true},
 		{name: "conflict", code: AFileOrFolderNameExist, want: false},
 	}
 
