@@ -61,24 +61,14 @@ func TestMoveLinkReqJSONIncludesContentHashValue(t *testing.T) {
 	}
 
 	payload, err := json.Marshal(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	var body map[string]any
-	if err := json.Unmarshal(payload, &body); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, json.Unmarshal(payload, &body))
 
 	contentHash, ok := body["ContentHash"]
-	if !ok {
-		t.Fatalf("expected ContentHash key in payload: %s", payload)
-	}
+	require.True(t, ok, "expected ContentHash key in payload: %s", payload)
 	contentHashString, ok := contentHash.(string)
-	if !ok {
-		t.Fatalf("expected ContentHash to be a string, got %#v", contentHash)
-	}
-	if contentHashString != expectedContentHash {
-		t.Fatalf("expected ContentHash value, got %#v", contentHashString)
-	}
+	require.True(t, ok, "expected ContentHash to be a string, got %#v", contentHash)
+	require.Equal(t, expectedContentHash, contentHashString)
 }

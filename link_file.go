@@ -91,18 +91,35 @@ func (c *Client) CreateRevision(ctx context.Context, shareID, linkID string) (Cr
 }
 
 func (c *Client) GetRevisionVerification(ctx context.Context, shareID, linkID, revisionID string) (RevisionVerificationRes, error) {
-	return c.fetchRevisionVerification(ctx, "/drive/shares/"+shareID+"/links/"+linkID+"/revisions/"+revisionID+"/verification")
+	return c.fetchRevisionVerification(
+		ctx,
+		"/drive/shares/{ShareID}/links/{LinkID}/revisions/{RevisionID}/verification",
+		map[string]string{
+			"ShareID":    shareID,
+			"LinkID":     linkID,
+			"RevisionID": revisionID,
+		},
+	)
 }
 
 func (c *Client) GetRevisionVerificationByVolume(ctx context.Context, volumeID, linkID, revisionID string) (RevisionVerificationRes, error) {
-	return c.fetchRevisionVerification(ctx, "/drive/v2/volumes/"+volumeID+"/links/"+linkID+"/revisions/"+revisionID+"/verification")
+	return c.fetchRevisionVerification(
+		ctx,
+		"/drive/v2/volumes/{VolumeID}/links/{LinkID}/revisions/{RevisionID}/verification",
+		map[string]string{
+			"VolumeID":   volumeID,
+			"LinkID":     linkID,
+			"RevisionID": revisionID,
+		},
+	)
 }
 
-func (c *Client) fetchRevisionVerification(ctx context.Context, path string) (RevisionVerificationRes, error) {
+func (c *Client) fetchRevisionVerification(ctx context.Context, path string, pathParams map[string]string) (RevisionVerificationRes, error) {
 	var res RevisionVerificationRes
 
 	if err := c.do(ctx, func(r *resty.Request) (*resty.Response, error) {
 		return r.
+			SetPathParams(pathParams).
 			SetResult(&res).
 			Get(path)
 	}); err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 
 	"github.com/go-resty/resty/v2"
@@ -79,17 +78,9 @@ func shouldRetryUploadBlock(err error) bool {
 		return false
 	}
 
-	if netErr := (*NetError)(nil); errors.As(err, &netErr) {
-		return true
-	}
-
-	if opErr := (*net.OpError)(nil); errors.As(err, &opErr) {
-		return true
-	}
-
 	if apiErr := (*APIError)(nil); errors.As(err, &apiErr) {
 		return apiErr.Status == http.StatusTooManyRequests || apiErr.Status == http.StatusServiceUnavailable
 	}
 
-	return false
+	return isTransientTransportError(err)
 }

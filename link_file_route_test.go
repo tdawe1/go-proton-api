@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/rclone/go-proton-api"
@@ -115,4 +116,60 @@ func TestMoveLinkByVolumePropagatesAPIError(t *testing.T) {
 	require.True(t, errors.As(err, &apiErr))
 	require.Equal(t, http.StatusInternalServerError, apiErr.Status)
 	require.Equal(t, proton.Code(9001), apiErr.Code)
+}
+
+func TestGetRevisionVerificationByVolumeEscapesPathSegments(t *testing.T) {
+	var gotEscapedPath string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEscapedPath = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"VerificationCode":"abc","ContentKeyPacket":"def"}`))
+	}))
+	defer ts.Close()
+
+	m := proton.New(proton.WithHostURL(ts.URL))
+	defer m.Close()
+
+	c := m.NewClient("", "", "")
+	defer c.Close()
+
+	volumeID := "volume/id"
+	linkID := "link/id"
+	revisionID := "revision/id"
+
+	_, err := c.GetRevisionVerificationByVolume(context.Background(), volumeID, linkID, revisionID)
+	require.NoError(t, err)
+	require.Equal(t,
+		"/drive/v2/volumes/"+url.PathEscape(volumeID)+"/links/"+url.PathEscape(linkID)+"/revisions/"+url.PathEscape(revisionID)+"/verification",
+		gotEscapedPath,
+	)
+}
+
+func TestGetRevisionVerificationEscapesPathSegments(t *testing.T) {
+	var gotEscapedPath string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEscapedPath = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"VerificationCode":"abc","ContentKeyPacket":"def"}`))
+	}))
+	defer ts.Close()
+
+	m := proton.New(proton.WithHostURL(ts.URL))
+	defer m.Close()
+
+	c := m.NewClient("", "", "")
+	defer c.Close()
+
+	shareID := "share/id"
+	linkID := "link/id"
+	revisionID := "revision/id"
+
+	_, err := c.GetRevisionVerification(context.Background(), shareID, linkID, revisionID)
+	require.NoError(t, err)
+	require.Equal(t,
+		"/drive/shares/"+url.PathEscape(shareID)+"/links/"+url.PathEscape(linkID)+"/revisions/"+url.PathEscape(revisionID)+"/verification",
+		gotEscapedPath,
+	)
 }

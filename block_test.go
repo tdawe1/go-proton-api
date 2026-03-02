@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/rclone/go-proton-api"
@@ -210,6 +211,34 @@ func TestUploadBlockRetriesOnTransportError(t *testing.T) {
 	require.Equal(t, retryCount+1, calls)
 }
 
+func TestUploadBlockSkipsRetryOnPermanentWrappedURLError(t *testing.T) {
+	retryCount := 3
+	calls := 0
+	transportErr := &url.Error{
+		Op:  "Post",
+		URL: "https://storage.proton.invalid/storage/blocks",
+		Err: &net.OpError{Op: "dial", Net: "tcp", Err: nonTimeoutNetError{msg: "permanent"}},
+	}
+
+	m := proton.New(
+		proton.WithHostURL("https://example.invalid"),
+		proton.WithRetryCount(retryCount),
+		proton.WithTransport(roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			return nil, transportErr
+		})),
+	)
+	defer m.Close()
+
+	c := m.NewClient("", "", "")
+	defer c.Close()
+
+	err := c.UploadBlock(context.Background(), "https://storage.proton.invalid/storage/blocks", "token", bytes.NewReader([]byte("payload")))
+	require.Error(t, err)
+	require.ErrorIs(t, err, transportErr)
+	require.Equal(t, 1, calls)
+}
+
 func mustReadBlockPayload(t *testing.T, r *http.Request) []byte {
 	t.Helper()
 
@@ -236,4 +265,20 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+type nonTimeoutNetError struct {
+	msg string
+}
+
+func (e nonTimeoutNetError) Error() string {
+	return e.msg
+}
+
+func (nonTimeoutNetError) Timeout() bool {
+	return false
+}
+
+func (nonTimeoutNetError) Temporary() bool {
+	return false
 }
