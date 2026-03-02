@@ -85,19 +85,20 @@ func TestUploadBlockRetriesOnTooManyRequests(t *testing.T) {
 }
 
 func TestUploadBlockHonorsConfiguredRetryCount(t *testing.T) {
+	retryCount := 2
 	var calls int
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"Code":9000,"Error":"boom"}`))
 	}))
 	defer ts.Close()
 
 	m := proton.New(
 		proton.WithHostURL(ts.URL),
-		proton.WithRetryCount(0),
+		proton.WithRetryCount(retryCount),
 	)
 	defer m.Close()
 
@@ -106,7 +107,7 @@ func TestUploadBlockHonorsConfiguredRetryCount(t *testing.T) {
 
 	err := c.UploadBlock(context.Background(), ts.URL, "token", bytes.NewReader([]byte("payload")))
 	require.Error(t, err)
-	require.Equal(t, 1, calls)
+	require.Equal(t, retryCount+1, calls)
 }
 
 func TestUploadBlockDoesNotRetryOnNonTransientAPIError(t *testing.T) {

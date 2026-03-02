@@ -99,10 +99,7 @@ func (c *Client) GetRevisionVerificationByVolume(ctx context.Context, volumeID, 
 }
 
 func (c *Client) fetchRevisionVerification(ctx context.Context, path string) (RevisionVerificationRes, error) {
-	var res struct {
-		VerificationCode string
-		ContentKeyPacket string
-	}
+	var res RevisionVerificationRes
 
 	if err := c.do(ctx, func(r *resty.Request) (*resty.Response, error) {
 		return r.
@@ -112,8 +109,5 @@ func (c *Client) fetchRevisionVerification(ctx context.Context, path string) (Re
 		return RevisionVerificationRes{}, err
 	}
 
-	return RevisionVerificationRes{
-		VerificationCode: res.VerificationCode,
-		ContentKeyPacket: res.ContentKeyPacket,
-	}, nil
+	return res, nil
 }

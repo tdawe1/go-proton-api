@@ -300,10 +300,6 @@ func isTransientTransportError(err error) bool {
 			return true
 		}
 
-		if opErr := (*net.OpError)(nil); errors.As(urlErr.Err, &opErr) {
-			return true
-		}
-
 		var netErr net.Error
 		if errors.As(urlErr.Err, &netErr) {
 			return netErr.Timeout()
