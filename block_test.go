@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/rclone/go-proton-api"
 	"github.com/stretchr/testify/require"
@@ -83,6 +84,75 @@ func TestUploadBlockRetriesOnTooManyRequests(t *testing.T) {
 	err := c.UploadBlock(context.Background(), ts.URL, "token", bytes.NewReader([]byte("payload")))
 	require.NoError(t, err)
 	require.Equal(t, 2, calls)
+}
+
+func TestUploadBlockHonorsRetryAfterHeader(t *testing.T) {
+	callTimes := make([]time.Time, 0, 2)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callTimes = append(callTimes, time.Now())
+		w.Header().Set("Content-Type", "application/json")
+
+		if len(callTimes) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"Code":9000,"Error":"boom"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"Code":1000}`))
+	}))
+	defer ts.Close()
+
+	m := proton.New(
+		proton.WithHostURL(ts.URL),
+		proton.WithRetryCount(1),
+	)
+	defer m.Close()
+
+	c := m.NewClient("", "", "")
+	defer c.Close()
+
+	err := c.UploadBlock(context.Background(), ts.URL, "token", bytes.NewReader([]byte("payload")))
+	require.NoError(t, err)
+	require.Len(t, callTimes, 2)
+	require.GreaterOrEqual(t, callTimes[1].Sub(callTimes[0]), 800*time.Millisecond)
+}
+
+func TestUploadBlockHonorsRetryAfterHTTPDate(t *testing.T) {
+	callTimes := make([]time.Time, 0, 2)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestTime := time.Now()
+		callTimes = append(callTimes, requestTime)
+		w.Header().Set("Content-Type", "application/json")
+
+		if len(callTimes) == 1 {
+			w.Header().Set("Retry-After", requestTime.UTC().Add(2*time.Second).Format(http.TimeFormat))
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"Code":9000,"Error":"boom"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"Code":1000}`))
+	}))
+	defer ts.Close()
+
+	m := proton.New(
+		proton.WithHostURL(ts.URL),
+		proton.WithRetryCount(1),
+	)
+	defer m.Close()
+
+	c := m.NewClient("", "", "")
+	defer c.Close()
+
+	err := c.UploadBlock(context.Background(), ts.URL, "token", bytes.NewReader([]byte("payload")))
+	require.NoError(t, err)
+	require.Len(t, callTimes, 2)
+	require.GreaterOrEqual(t, callTimes[1].Sub(callTimes[0]), 900*time.Millisecond)
 }
 
 func TestUploadBlockHonorsConfiguredRetryCount(t *testing.T) {
@@ -237,6 +307,52 @@ func TestUploadBlockSkipsRetryOnPermanentWrappedURLError(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, transportErr)
 	require.Equal(t, 1, calls)
+}
+
+func TestUploadBlockRefreshesAuthOnUnauthorized(t *testing.T) {
+	uploadCalls := 0
+	refreshCalls := 0
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/upload":
+			uploadCalls++
+			w.Header().Set("Content-Type", "application/json")
+
+			if uploadCalls == 1 {
+				require.Equal(t, "Bearer expired-access-token", r.Header.Get("Authorization"))
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"Code":10013,"Error":"token expired"}`))
+				return
+			}
+
+			require.Equal(t, "Bearer refreshed-access-token", r.Header.Get("Authorization"))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"Code":1000}`))
+		case "/auth/v4/refresh":
+			refreshCalls++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"UID":"uid","AccessToken":"refreshed-access-token","RefreshToken":"refreshed-refresh-token"}`))
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	m := proton.New(
+		proton.WithHostURL(ts.URL),
+		proton.WithRetryCount(0),
+	)
+	defer m.Close()
+
+	c := m.NewClient("uid", "expired-access-token", "refresh-token")
+	defer c.Close()
+
+	err := c.UploadBlock(context.Background(), ts.URL+"/upload", "storage-token", bytes.NewReader([]byte("payload")))
+	require.NoError(t, err)
+	require.Equal(t, 2, uploadCalls)
+	require.Equal(t, 1, refreshCalls)
 }
 
 func mustReadBlockPayload(t *testing.T, r *http.Request) []byte {
