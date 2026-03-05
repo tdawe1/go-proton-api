@@ -1,9 +1,11 @@
 package proton_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/rclone/go-proton-api"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_HMAC(t *testing.T) {
@@ -26,4 +28,47 @@ func Test_HMAC(t *testing.T) {
 	check(t, "întuneric", "6bed2bff136e165ad54d0a2a9a549481c88aca55d567c93123e0e5b876c291b2")
 	check(t, "mädchen", "2b112b1b7ac4fd9dae5a2acd8fcf2e905bd92a06a95dc4495fa012bda93e8607")
 	check(t, "integrationTestImage.png", "2e700ef3b52379a9277ac48bcfc5dff56e6927274267a0df4673f4f21e5d04d6")
+}
+
+func TestMoveLinkReqJSONIncludesNullContentHash(t *testing.T) {
+	req := proton.MoveLinkReq{
+		ParentLinkID: "parent",
+		Name:         "enc-name",
+		OriginalHash: "original",
+		Hash:         "next",
+		ContentHash:  nil,
+	}
+
+	payload, err := json.Marshal(req)
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(payload, &body))
+
+	contentHash, ok := body["ContentHash"]
+	require.True(t, ok, "expected ContentHash key in payload: %s", payload)
+	require.Nil(t, contentHash)
+}
+
+func TestMoveLinkReqJSONIncludesContentHashValue(t *testing.T) {
+	expectedContentHash := "content-hash"
+	req := proton.MoveLinkReq{
+		ParentLinkID: "parent",
+		Name:         "enc-name",
+		OriginalHash: "original",
+		Hash:         "next",
+		ContentHash:  &expectedContentHash,
+	}
+
+	payload, err := json.Marshal(req)
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(payload, &body))
+
+	contentHash, ok := body["ContentHash"]
+	require.True(t, ok, "expected ContentHash key in payload: %s", payload)
+	contentHashString, ok := contentHash.(string)
+	require.True(t, ok, "expected ContentHash to be a string, got %#v", contentHash)
+	require.Equal(t, expectedContentHash, contentHashString)
 }
