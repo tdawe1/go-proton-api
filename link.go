@@ -42,7 +42,7 @@ func (c *Client) MoveLinkByVolume(ctx context.Context, volumeID, linkID string, 
 	}
 
 	if err := c.do(ctx, func(r *resty.Request) (*resty.Response, error) {
-		return r.SetResult(&res).SetBody(req).Put("/drive/v2/volumes/" + volumeID + "/links/" + linkID + "/move")
+return r.SetResult(&res).SetBody(req).SetPathParams(map[string]string{"volumeID": volumeID, "linkID": linkID}).Put("/drive/v2/volumes/{volumeID}/links/{linkID}/move")
 	}); err != nil {
 		return err
 	}
